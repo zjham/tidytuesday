@@ -1,0 +1,22 @@
+---
+title: "nyc restaurants"
+author: "Zachary Hamilton"
+date: "11/12/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+```{r}
+df <- read_csv("https://data.cityofnewyork.us/api/views/43nn-pn8j/rows.csv")
+
+df %>%
+  janitor::clean_names() %>%
+  glimpse() %>%
+  count(critical_flag)
+
+```
+

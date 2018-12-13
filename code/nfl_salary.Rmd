@@ -1,0 +1,66 @@
+---
+title: "tidy_tuesday_2018-04-09"
+author: "Zachary Hamilton"
+date: "28/10/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r prework, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(here)
+library(scales)
+
+nfl_salary <- readxl::read_xlsx(here("data", "nfl_salary.xlsx"))
+
+theme_set(new = theme_light())
+
+
+```
+
+Data set appears to be NFL salaries for various positions from 2011 to 2018. Would rather have year, position, salary columns. Good job for gather function. 
+
+```{r cleaning, echo=FALSE}
+nfl_salary_tidy <- nfl_salary %>%
+  gather(key = "position", value = "salary", 2:11) %>%
+  filter(!is.na(salary))
+```
+
+
+# First Question that jumps out in my mind is what position makes the most money?
+
+```{r}
+nfl_salary_tidy %>%
+  mutate(position = fct_reorder(position, salary, median)) %>%
+  ggplot(aes(x = position, y = log(salary))) +
+  geom_boxplot() +
+  coord_flip() 
+  
+```
+
+Linemen seem to be consistently near the top in median salary each year. Most variation in the quarterback position. Consistently have highest paid + lowest paid players in the NFL. in 2018,9 of top 10 paid players were quarterbacks, as were 9 of 10 lowest paid players! This is likely because teams carry 3rd string quarterbacks who often won't take a snap for the entire season, whereas there are multiple starting offensive & defensive lineman who play an integral role to their teams success each game. 
+
+```{r}
+nfl_salary_tidy %>%
+  filter(year == 2018) %>%
+  group_by(year) %>%
+  arrange(salary)
+```
+
+Has the leagues average salary gone up?
+
+```{r}
+nfl_salary_tidy %>%
+  group_by(year, position) %>%
+  summarize(median = median(salary)) %>%
+  ggplot(aes(year, median, col = position)) +
+  geom_point() +
+  geom_line() +
+  scale_y_continuous(labels = dollar_format())
+```
+

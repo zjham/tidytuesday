@@ -1,0 +1,142 @@
+---
+title: "Malaria"
+author: "Zachary Hamilton"
+date: "20/11/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+
+```{r import and clean}
+library(tidyverse)
+library(gapminder)
+library(wbstats)
+theme_set(theme_light())
+
+malaria_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018-11-13/malaria_deaths_age.csv")
+
+
+malaria_processed <- malaria_raw %>%
+  select(-X1)
+
+pop_data <- wb(indicator = "SP.POP.TOTL", startdate = 2016, enddate = 2016) 
+
+malaria_per_cap <- malaria_processed %>%
+  left_join(select(pop_data, iso3c, value), by = c("code" = "iso3c")) %>%
+  mutate(deaths_per_100k = deaths/value * 100000) %>%
+  filter(year == 2016, !is.na(code), entity != "World")
+```
+
+
+```{r deaths over time by age }
+
+malaria_processed %>%
+  group_by(year, age_group) %>%
+  summarise(mean(deaths)) %>%
+  ggplot(aes(year, `mean(deaths)`, col = as.factor(age_group))) +
+  geom_line(size = 1.1) +
+  geom_point(size = 2) +
+  labs(title = "Malaria Deaths by age group over time",
+       x = 'Year', 
+       y = 'Dpaths',
+       col = 'Age Range')
+
+```
+
+
+The Under 5 Age group stands out as the demographic that is most often fatally affected by malaria.
+
+Let's look on a map to see what regions of the world are most affected in 2016, our most current data, in this age group 
+
+```{r top countries under 5}
+
+malaria_processed %>%
+  filter(year == 2016, age_group == 'Under 5') %>%
+  mutate(entity = fct_reorder(entity, deaths)) %>%
+  filter(deaths > 0) %>%
+  arrange(desc(deaths)) %>%
+  filter(!is.na(code), entity != 'World') %>%
+  head(15) %>%
+  ggplot(aes(entity, deaths, fill = entity)) +
+  geom_col() + 
+  coord_flip() +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(title = "Countries affected by malaria in 2016",
+       subtitle = "Only Under 5 Age Group Shown",
+        x = "Country")
+  
+
+```
+
+Nigeria had roughly triple the amount of deaths as the next highest country, the overwhelming majority are African countries, with the major exception of India, which makes me think I should probably make some sort of per capita adjustment instead of looking at overall counts. Let's find a world population table to join on and make some calculations - good old gapminder might do the trick. 
+
+```{r gapminder test}
+
+gapminder %>%
+  summarize(max(year))
+
+```
+
+Most recent data available in gapminder dataset is 2007, this most certainly WILL NOT do! 
+
+```{r per capita}
+malaria_processed %>%
+  glimpse()
+
+pop_data <- wb(indicator = "SP.POP.TOTL", startdate = 2016, enddate = 2016) 
+
+malaria_processed %>%
+  left_join(select(pop_data, iso3c, value), by = c("code" = "iso3c")) %>%
+  mutate(deaths_per_100k = deaths/value * 100000) %>%
+  filter(year == 2016, age_group == 'Under 5') %>%
+  mutate(entity = fct_reorder(entity, deaths_per_100k)) %>%
+  filter(deaths > 0) %>%
+  filter(!is.na(code), entity != 'World') %>%
+  arrange(desc(deaths_per_100k)) %>%
+  head(15) %>%
+  ggplot(aes(entity, deaths_per_100k, fill = entity)) +
+  geom_col() + 
+  coord_flip() +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(title = "Countries affected by malaria in 2016",
+       subtitle = "Only Under 5 Age Group Shown",
+        x = "Country")
+  
+
+```
+
+poof, just like that India disappears from our chart because of its massive population rescaling factor. Burkina Faso, which has a population of `r as.double(filter(pop_data, country == "Burkina Faso")["value"])` Lets look at this world distribution on a map. 
+
+```{r}
+malaria_per_cap %>%
+  glimpse()
+
+world_map <- map_data("world") %>%
+  mutate(code = countrycode::countrycode(region, "country.name", "iso3c"))
+  
+world_map %>%
+  left_join(select(malaria_per_cap, code, entity, value, age_group, deaths, deaths_per_100k), by = "code") %>%
+  filter(age_group != 'Under 5', !is.na(age_group)) %>%
+  ggplot(aes(x = long, y = lat)) +
+  geom_polygon(aes(group = group, fill = deaths_per_100k)) +
+  lims(y = c(-55, 90)) +
+  scale_fill_viridis_c(end = .75, option = "B") +
+  theme(axis.line = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      axis.title = element_blank(),
+      panel.background = element_blank(),
+      panel.border = element_blank(),
+      panel.grid = element_blank(),
+      panel.spacing = unit(0, "lines"),
+      plot.background = element_blank(),
+      legend.justification = c(0, 0),
+      legend.position = c(0, 0)) +
+  facet_wrap(~ age_group)
+```
+

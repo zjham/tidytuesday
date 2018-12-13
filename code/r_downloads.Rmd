@@ -1,0 +1,52 @@
+---
+title: "r-packages"
+author: "Zachary Hamilton"
+date: "03/11/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(sf)
+library(rworldmap)
+library(countrycode)
+
+theme_set(theme_bw()) 
+
+r_packages_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018-10-30/r_downloads_year.csv")
+
+world <- getMap(resolution = "low")
+world <- st_as_sf(world)
+
+
+```
+
+```{r cleaning}
+
+r_packages <- r_packages_raw %>%
+  select(-X1)
+  
+r_packages
+```
+
+
+
+```{r}
+
+r_packages %>%
+  count(country, sort = TRUE) %>%
+  full_join(world, by = c("country" = "ISO_A2")) %>%
+  ggplot(aes(fill = n)) +
+    geom_sf() +
+    scale_fill_viridis_c(option = "viridis", trans = "sqrt") +
+    coord_sf(ylim = c(-60, 90), expand = FALSE) +
+    labs(title = "R Downloads on October 30th, 2018 Visualized by Country", 
+         x = "longitude", 
+         y = "latitude")
+```
+ 
+ 

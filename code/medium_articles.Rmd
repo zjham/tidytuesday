@@ -1,0 +1,204 @@
+---
+title: "Medium Tidytext"
+author: "Zachary Hamilton"
+date: "03/12/2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE)
+
+library(knitr)
+library(tidyverse)
+library(lubridate)
+library(rvest)
+
+
+theme_set(theme_minimal())
+```
+
+```{r, cache=TRUE, include=FALSE}
+medium_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018-12-04/medium_datasci.csv")
+
+medium <- medium_raw %>%
+  gather(key = "tag", value = "value", tag_ai:tag_machine_learning, -x1) %>%
+  filter(value == 1, !is.na(title)) %>%
+  unite("date", year, month, day, sep = "-") %>%
+  mutate(date = as_date(date),
+         tag = str_to_title(str_replace_all(str_replace(tag, "tag_", ""), "_", " ")),
+         tag = ifelse(tag == "Ai", "Artificial Intelligence", tag)) %>%
+  select(-x1) %>%
+  group_by(title, subtitle, date, tag) %>%
+  slice(1) %>%
+  ungroup()
+
+```
+
+## Examining Relationship between "Tags"
+
+Using the slice function, only 1 row for each unique combination of title, subtitle, date, tag was kept. It appears that multiple copies of this same combination were either inadvertent duplicates of a story, or multiple parts of the same story. The most common tags for stories in this dataset are as follows:
+
+```{r}
+
+medium %>%
+  count(tag, sort = TRUE) %>%
+  mutate(tag = fct_reorder(tag, n)) %>%
+  ggplot(aes(tag, n, fill = tag)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Number of articles with each topic tag",
+       x = "Number of Articles",
+       y = "") +
+  scale_fill_viridis_d(option = "C", ) +
+  theme(panel.grid.major.y = element_blank())
+
+medium %>%
+  group_by(title, subtitle, date) %>%
+  summarize(number_tags = n()) %>%
+  ungroup() %>%
+  count(number_tags) %>%
+  kable(col.names = c("Number of Tags", "Articles")) %>%
+    kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE)
+  
+
+```
+
+
+As you can see, many stories have multiple "tags" relating to the article topic. We might do some sort of correlation to see which tags are most often found with each other, or some sort of network analysis. For the purposes of tidy data and to allow for comparisons of key features across the different topics, each separate tag for a story has been given a separate row using the `gather` function.
+
+First, lets have a look at the "reading time" and "clap" variables to see how these compared across the different topics. 
+
+```{r}
+medium %>%
+  mutate(tag = fct_reorder(tag, reading_time)) %>%
+  ggplot(aes(tag, reading_time + 1)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  coord_flip()
+
+medium %>%
+  mutate(tag = fct_reorder(tag, claps)) %>%
+  ggplot(aes(tag, claps)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  coord_flip()
+
+```
+
+No perceivable differences in reading time or claps across the different tags. 
+
+
+Upon inspecting the associated urls, it appears that articles given the title ".", ":" or "-" in this dataset are either written in a language other than english such as mandarin or arabic, or contain symbols that cannot be coded as simple text i.e. trademark<sup>TM</sup>. As such they will not be discarded from the dataset. 
+
+Do articles that contain an image get more claps?
+
+```{r, message=FALSE}
+medium_wide <- medium %>%
+  spread(key = tag, value = value) 
+
+medium_wide %>%
+  ggplot(aes(claps, fill = factor(image))) +
+    geom_density(alpha = 0.5) +
+    scale_x_log10()
+
+medium_wide %>%
+  group_by(image) %>%
+  summarize(q25 = quantile(claps, probs = .25),
+            median(claps),
+            q75 = quantile(claps, probs = .75),
+            mean(claps),
+            sd = sd(claps))
+
+with(medium_wide, wilcox.test(claps ~ image, alternative = "less"))
+
+```
+
+independent 2-group Mann-Whitney U Test used to test likelihood that a 'claps' value from a randomly selected article without an image will be less than a 'claps' value similarly obtained from a article with an image. p-value reported as < 2.2e-16 so we can reject the null hypothesis. This test is non-parametric, i.e. does not assume a normal distribution of the data.  
+
+
+## Tidytext Analysis
+
+To wrap up, let's do some brief sentiment analyis on some of the articles with the highest number of claps to see if there are any common trends. We will make use of the `tidytext` package. Also, I just finished the R Shiny course on DataCamp where you make a wordcloud app so I thought that might be fun to try out here too.
+
+
+```{r, message=FALSE}
+library(tidytext)
+library(wordcloud)
+library(cowplot)
+
+medium_top <- medium_wide %>%
+  arrange(desc(claps)) %>%
+  head(4)
+
+articles_raw <- map(medium_top$url, read_html)
+
+articles_parsed <- map(articles_raw, xml_nodes, css = ".sectionLayout--insetColumn .graf--p") %>%
+map(xml_text) %>%
+map(tbl_df)
+
+articles_parsed <- map2(medium_top$title, articles_parsed, function(x, y) mutate(y, title = x))
+
+parse_raw <- function(x) {
+  mutate(x, para = row_number()) %>%
+  unnest_tokens(word, value) %>%
+  anti_join(get_stopwords()) %>%
+  count(word, sort = TRUE)                            
+}
+
+article_words <- map(articles_parsed, parse_raw)
+
+my_pal <- RColorBrewer::brewer.pal(4, name = "Dark2")
+
+par(mfrow = c(2, 2), mai = c(0, 0, 0, 0))
+wordcloud(article_words[[1]]$word, article_words[[1]]$n, colors = my_pal, max.words = 50)
+wordcloud(article_words[[2]]$word, article_words[[2]]$n, colors = my_pal, max.words = 50)
+wordcloud(article_words[[3]]$word, article_words[[3]]$n, colors = my_pal, max.words = 50)
+wordcloud(article_words[[4]]$word, article_words[[4]]$n, colors = my_pal, max.words = 50)
+
+```
+
+
+Top 4 articles by 'claps' were scraped using a combination of `purrr::map` and 'read_html'. The CSS selector google chrome extension helped target relevant areas of the webpage for analysis. Using tidytext tools, each paragraph was given a sentiment rating based on perceived 'positive' words minus 'negative' words. This can be visualized below for each of the same 4 articles. 
+
+
+```{r, message=FALSE} 
+
+parse_tidy <- function(x) {
+  mutate(x, para = row_number()) %>%
+  unnest_tokens(word, value) %>%
+  anti_join(get_stopwords())
+}
+
+tidy_articles <- map(articles_parsed, parse_tidy)
+
+add_sentiments <- function(df) {
+  inner_join(df, get_sentiments("bing")) %>%
+  count(para, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+}
+
+articles_sentiment <- map(tidy_articles, add_sentiments)
+
+articles_sentiment_combined <- bind_rows(articles_sentiment, .id = "title") %>%
+  mutate(article_title = case_when(title == 1 ~ medium_top$title[1],
+                                   title == 2 ~ medium_top$title[2],
+                                   title == 3 ~ medium_top$title[3],
+                                   title == 4 ~ medium_top$title[4]),
+         article_title = as_factor(article_title))
+
+articles_sentiment_combined %>%
+  ggplot(aes(para, sentiment, fill = article_title)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ title, scales = "free") +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 4)) +
+  scale_fill_discrete(name = "Article Title") +
+  labs(x = "Paragraph Number",
+       y = "Sentiment Score",
+       title = "Sentiment Analysis of Top 4 Liked Medium Articles from 2017/18")
+```
+
+

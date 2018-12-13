@@ -1,0 +1,116 @@
+---
+title: "Baltimore Bridges"
+author: "Zachary Hamilton"
+date: "November 26, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggridges)
+theme_set(theme_minimal())
+
+bridges <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018-11-27/baltimore_bridges.csv")
+
+bridges_processed <- bridges %>%
+  mutate(bridge_condition = factor(bridge_condition, 
+                                   levels = c("Good", "Fair", "Poor")))
+
+bridges_processed <- bridges_processed %>%
+  select(-vehicles) %>%
+  mutate(inspection_yr = ifelse(nchar(inspection_yr) == 1,
+                                as.numeric(paste("200", inspection_yr, sep = "")),
+                                as.numeric(paste("20", inspection_yr, sep = ""))))
+
+bridges_processed %>% 
+  count(inspection_yr)
+```
+
+##Bridge Condition
+
+First thing I wanted to see was whether older bridges were generally in worse condition based on their most recent inspection. I accomplished this with a stacked bar chart that makes it easy to see the fractional distribution change over time. 
+
+```{r}
+bridges_processed %>% 
+  filter(yr_built > 1920) %>%
+  count(yr_built, bridge_condition) %>%
+  ggplot(aes(yr_built, fill = bridge_condition), col = "black") +
+  geom_bar(position = "fill", width = 1) +
+  scale_fill_manual(name = "Bridge Condition", 
+                    values = c("#241773", "#9E7C0C", "#000000")) +
+  scale_x_continuous(limits = c(1920, 2018), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  theme(axis.ticks.y.left = element_blank(),
+        axis.title.y.left = element_blank(),
+        axis.text.y.left = element_blank(),
+        panel.grid = element_blank(),
+        axis.text.x =  element_text(angle = 45, size = 14, vjust = .6),
+        axis.title.x = element_text(size = 16)) +
+  labs(x = "Year Built",
+       title = "Condition of Bridges in Maryland sorted by year built") +
+  ggsave("./plots/bridges_cond_year", device = "png")
+
+```
+
+
+All bridges that carry a "poor" condition attribute were built before 1990. The overwhelming majority of bridges were inspected in 2015 or later. 1 each were inspected in 2009, 2013, 2014. Might be worth looking at those. Two have fairly low traffic but very high total improvement costs and one was built just recently in 2013 and maintained a good condition based on a 2014 inspection. 
+
+
+```{r}
+bridges_processed %>%
+  filter(inspection_yr %in% c(2009, 2013, 2014))
+
+```
+
+
+There are 11 bridges in operation that were built before 1900, none of which are in poor condition, all recently inspected. Let's have a look at the bridges that are in poor condition and see if financial circumstances might be holding back repairs. 
+
+```{r}
+bridges_processed %>%
+  group_by(bridge_condition) %>%
+  summarize(median(total_improve_cost_thousands, na.rm = TRUE))
+
+```
+
+Bridges that are in a "poor" condition would cost significantly more to repair than those in fair/good condition, as suspected.
+
+```{r, warning=FALSE, message=FALSE}
+bridges_processed %>%
+  filter(total_improve_cost_thousands < 1000) %>%
+  ggplot(aes(total_improve_cost_thousands, bridge_condition, fill = ..x..)) +
+  geom_density_ridges_gradient(jittered_points = TRUE,
+    position = position_points_jitter(width = 0.05, height = 0),
+    point_shape = '|', point_size = 3, point_alpha = 1, alpha = 0.7,
+    scale = 2) +
+  scale_fill_viridis_c(name = "Improvement Costs (Thousands)", option = "E") +
+  labs(title = "Distribution of Improvement Costs of Maryland Bridges in Different States of Repair",
+       subtitle = "Classifications made by Federal Highway Admin.",
+       y = "Bridge Condition",
+       x = "Total Improvement Costs (Thousands)") +
+  ggsave("./plots/bridges_cond_repair", device = "png") 
+  
+
+
+```
+
+##Traffic Relationships
+
+Any correlation between the condition of a bridge and the amount of traffic it receives? Maybe a heavy traffic bridge will be repaired more often and kept in good condition? 
+
+```{r}
+bridges_processed %>%
+  ggplot(aes(x = bridge_condition, y = avg_daily_traffic, col = bridge_condition)) +
+  geom_jitter(alpha = 0.9, size = 2, show.legend = FALSE) +
+  scale_color_brewer(palette = "Accent") +
+  labs(title = "Because Less People Use Them, That's Why!",
+       x = "Bridge Condition", 
+       y = "Average Daily Vehicle Traffic") +
+  ggsave("./plots/bridges_cond_traffic", device = "png")
+
+```
+
+Looks like most of the bridges that are in "poor" condition have a relatively low average daily vehicle traffic. This could partly explain why they have been left in this state while priority has been given to maintaining high traffic bridges. 
